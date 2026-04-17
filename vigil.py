@@ -55,7 +55,7 @@ def scan_port(target, port):
         sock.close()
 
     except KeyboardInterrupt:
-        print("[+] Canceled by user")
+        return
 
 def discover_network(discover, interface):
     try:
