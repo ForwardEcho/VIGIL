@@ -47,8 +47,8 @@ VIGIL operates on three core technical layers:
 ### 2. Setup
 ```bash
 # Clone the repository
-git clone https://github.com/ForwardEcho/vigil.git
-cd vigil
+git clone https://github.com/ForwardEcho/VIGIL.git
+cd VIGIL
 
 # Install required library
 pip install scapy
