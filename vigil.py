@@ -8,6 +8,8 @@ import socket
 import time
 import json
 import sys
+import ipaddress
+from urllib.parse import urlparse
 
 banner = f"""\033[1;32m
                 ██╗   ██╗██╗ ██████╗ ██╗██╗     
@@ -29,13 +31,14 @@ found_ports = []
 with open("vendors.json", "r", encoding="utf-8") as f:
     vendors_dict = json.load(f)
 
-def scan_port(target, port, verbose=False):
+def scan_port(target_ip, port, verbose=False, host_header=None):
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(0.7)
-            result = sock.connect_ex((target, port))
+            result = sock.connect_ex((target_ip, port))
 
-            head_payload = b"HEAD / HTTP/1.1\r\nHost: " + target.encode() + b"\r\n\r\n"
+            if not host_header:
+                host_header = target_ip
             
             if result == 0:
                 try:
@@ -47,7 +50,7 @@ def scan_port(target, port, verbose=False):
                 if verbose:
                     try:
                         if service == "http" or "https" in service or port in [80, 443, 8080, 8443]:
-                            payload = b"HEAD / HTTP/1.1\r\nHost: " + target.encode() + b"\r\n\r\n"
+                            payload = b"HEAD / HTTP/1.1\r\nHost: " + host_header.encode() + b"\r\n\r\n"
                             sock.send(payload)
                             raw_response = sock.recv(1024).decode(errors="ignore")
 
@@ -154,6 +157,69 @@ def vigilant_mode(interface):
     except KeyboardInterrupt:
         print(f"\033[1;31m⍻\033[0m Vigilant mode disabled")
 
+def parse_ports(port_input):
+    if not port_input:
+        return list(range(1, 65536))
+
+    selected_ports = set()
+    chunks = [chunk.strip() for chunk in port_input.split(",") if chunk.strip()]
+
+    for chunk in chunks:
+        if "-" in chunk:
+            start_port, end_port = chunk.split("-", 1)
+            start_port = int(start_port)
+            end_port = int(end_port)
+
+            if start_port > end_port:
+                raise ValueError(f"invalid port range: {chunk}")
+
+            for port in range(start_port, end_port + 1):
+                if port < 1 or port > 65535:
+                    raise ValueError(f"port out of range: {port}")
+                selected_ports.add(port)
+        else:
+            port = int(chunk)
+            if port < 1 or port > 65535:
+                raise ValueError(f"port out of range: {port}")
+            selected_ports.add(port)
+
+    return sorted(selected_ports)
+
+
+def validate_target(target):
+    try:
+        ipaddress.ip_address(target)
+        return True
+    except ValueError:
+        return False
+
+
+def normalize_target(target):
+    if not target:
+        return None, None
+
+    raw_target = target.strip()
+    parsed_target = raw_target
+
+    if "://" in raw_target:
+        parsed = urlparse(raw_target)
+        parsed_target = parsed.hostname or ""
+
+    if not parsed_target:
+        raise ValueError("target URL/hostname is empty")
+
+    try:
+        ipaddress.ip_address(parsed_target)
+        return parsed_target, parsed_target
+    except ValueError:
+        pass
+
+    try:
+        resolved_ip = socket.gethostbyname(parsed_target)
+        return resolved_ip, parsed_target
+    except socket.gaierror:
+        raise ValueError(f"unable to resolve target: {target}")
+
 def main():
     arg = argparse.ArgumentParser(
         description="VIGIL - Virtual Interface for Gateway Inspection & Listening",
@@ -163,6 +229,14 @@ def main():
     arg.add_argument("--discover", "-d", required=False, type=str, default=None, help="discover active hosts in a network")
     arg.add_argument("--interface", "-i", required=False, type=str, default=None, help="interface to use for discovery")
     arg.add_argument("--show-interfaces", "-si", action="store_true", help="show available interfaces")
+    arg.add_argument(
+        "--ports",
+        "-p",
+        required=False,
+        type=str,
+        default=None,
+        help="ports to scan (examples: 80, 22,80,443, 1-1024, 22,80-90)"
+    )
     arg.add_argument("--vigilant", "-v", action="store_true", help="enable vigilant mode")
     arg.add_argument("--verbose", "-vv", action="store_true", help="enable verbose mode")
     arg.add_argument("--threads", "-w", required=False, type=int, default=30, help="number of threads (default: 30)")
@@ -177,14 +251,26 @@ def main():
     display_iface = args.show_interfaces
     vigilant = args.vigilant
     verbose = args.verbose
+    ports = args.ports
 
     if len(sys.argv) == 1:
         print(banner)
         arg.print_help()
         sys.exit()
 
+    scan_target_ip = None
+    scan_target_host = None
+
+    if target:
+        try:
+            scan_target_ip, scan_target_host = normalize_target(target)
+        except ValueError as e:
+            print(f"[!] {e}")
+            sys.exit(1)
+
     print(banner)
-    print(f"Scanning {target} at time {timestamp}")
+    if target:
+        print(f"Scanning {target} at time {timestamp}")
     print(f"Visit : https://github.com/ForwardEcho\n")
 
     if display_iface:
@@ -203,8 +289,10 @@ def main():
 
     if verbose:
         print(f"\033[1;32m✓\033[0m Verbose mode enabled (Banner Grabbing & Scapy Debug)")
-        print(f"[*] Target IP      : {target}")
+        print(f"[*] Input Target   : {target}")
+        print(f"[*] Resolved IP    : {scan_target_ip}")
         print(f"[*] Thread Count   : {thread}")
+        print(f"[*] Port Selection : {ports if ports else '1-65535'}")
         print(f"[*] Interface      : {interface if interface else 'Default'}")
         print(f"[*] Output File    : {output if output else 'None'}")
         print(f"[*] Scapy L3 Conf  : {conf.iface}")
@@ -212,9 +300,10 @@ def main():
 
     if target:
         try:
+            scan_ports = parse_ports(ports)
             with ThreadPoolExecutor(max_workers=thread) as executor:
-                for port in range(1, 65535):
-                    executor.submit(scan_port, target, port, verbose)
+                for port in scan_ports:
+                    executor.submit(scan_port, scan_target_ip, port, verbose, scan_target_host)
             if output:
                 with open(output, "w") as f:
                     f.write(f"Scan completed at {timestamp}\n")
@@ -223,6 +312,9 @@ def main():
 
         except KeyboardInterrupt:
             print(f"\033[1;31m⍻\033[0m Canceled by user")
+        except ValueError as e:
+            print(f"[!] Invalid ports format: {e}")
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()
