@@ -1,3 +1,4 @@
+import nvdlib
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from scapy.all import srp, Ether, ARP, conf, show_interfaces, sniff, sr1, IP, TCP
@@ -33,6 +34,8 @@ def scan_port(target, port, verbose=False):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(0.7)
             result = sock.connect_ex((target, port))
+
+            head_payload = b"HEAD / HTTP/1.1\r\nHost: " + target.encode() + b"\r\n\r\n"
             
             if result == 0:
                 try:
@@ -43,7 +46,21 @@ def scan_port(target, port, verbose=False):
                 banner = ""
                 if verbose:
                     try:
-                        banner = sock.recv(1024).decode(errors="ignore").strip().replace("\n", " ")
+                        if service == "http" or "https" in service or port in [80, 443, 8080, 8443]:
+                            payload = b"HEAD / HTTP/1.1\r\nHost: " + target.encode() + b"\r\n\r\n"
+                            sock.send(payload)
+                            raw_response = sock.recv(1024).decode(errors="ignore")
+
+                            for line in raw_response.split("\r\n"):
+                                if line.startswith("Server:"):
+                                    banner = line.replace("Server: ", "").strip()
+                                    break
+                            
+                            if not banner:
+                                banner = raw_response.split("\n")[0].strip()
+
+                        else:
+                            banner = sock.recv(1024).decode(errors="ignore").strip().replace("\n", " ")
                     except:
                         banner = ""
 
@@ -57,8 +74,49 @@ def scan_port(target, port, verbose=False):
                     print(msg)
                     found_ports.append(history_msg)
 
+                if banner:
+                    lookup_cve(banner)
+
     except Exception:
         pass
+
+def lookup_cve(banner):
+    clean_keyword = banner
+    if banner.startswith("SSH-"):
+        parts = banner.split('-')
+        if len(parts) >= 3:
+            clean_keyword = "-".join(parts[2:])
+            
+    clean_keyword = clean_keyword.split('(')[0].replace('_', ' ').replace('/', ' ').strip()
+    
+    words = clean_keyword.split()
+    if len(words) >= 2:
+        clean_keyword = f"{words[0]} {words[1]}"
+    elif len(words) == 1:
+        clean_keyword = words[0]
+    else:
+        return
+
+    if len(clean_keyword) < 4 or "HTTP/" in clean_keyword:
+        return
+
+    try:
+        r = nvdlib.searchCVE(keywordSearch=clean_keyword, limit=3)
+
+        for eachCVE in r:
+            try:
+                score = eachCVE.score[1] if hasattr(eachCVE, 'score') else "N/A"
+            except:
+                score = "N/A"
+            
+            with print_lock:
+                print(f"└──> \033[1;31m ⚡︎ CVE Found:\033[0m {eachCVE.id} (Score: {score})")
+                if hasattr(eachCVE, 'descriptions') and eachCVE.descriptions:
+                    print(f"└──> {eachCVE.descriptions[0].value}")
+
+    except Exception:
+        pass
+        
 
 def discover_network(discover, interface, verbose=False):
     try:
