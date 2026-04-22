@@ -1,325 +1,229 @@
-# VIGIL - Virtual Interface for Gateway Inspection & Listening
+# 🛡️ VIGIL v1.5: Advanced Network Reconnaissance & Security Sentinel
+### Virtual Interface for Gateway Inspection & Listening
 
-![Version](https://img.shields.io/badge/version-1.4-green)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-important)
+[![Version](https://img.shields.io/badge/Version-1.5-0078D4?style=for-the-badge&logo=github)](https://github.com/ForwardEcho/VIGIL)
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-MIT-4CAF50?style=for-the-badge)](LICENSE)
+[![Interface](https://img.shields.io/badge/UI-Interactive_TUI-FF69B4?style=for-the-badge)](https://github.com/willmcgugan/rich)
+[![Contributors](https://img.shields.io/github/contributors/ForwardEcho/VIGIL?style=for-the-badge)](https://github.com/ForwardEcho/VIGIL/graphs/contributors)
+[![Issues](https://img.shields.io/github/issues/ForwardEcho/VIGIL?style=for-the-badge)](https://github.com/ForwardEcho/VIGIL/issues)
 
-VIGIL is a practical Python recon tool for authorized security testing.  
-It combines:
-- fast multi-threaded TCP port scanning,
-- service banner grabbing,
-- optional CVE enrichment,
-- heuristic risk scoring,
-- ARP host discovery,
-- and live packet monitoring (Vigilant mode).
+VIGIL is a comprehensive security assessment suite engineered for enterprise-grade network visibility and real-time threat intelligence. Leveraging a high-concurrency architecture and an intuitive Terminal User Interface (TUI), VIGIL seamlessly integrates active reconnaissance capabilities with passive intrusion monitoring to deliver unparalleled security insights.
 
 ---
 
-## Table of Contents
-- [1. Feature Overview](#1-feature-overview)
-- [2. Installation](#2-installation)
-- [3. Quick Start](#3-quick-start)
-- [4. Detailed CLI Reference](#4-detailed-cli-reference)
-- [5. Scan Output Format](#5-scan-output-format)
-- [6. Usage Scenarios](#6-usage-scenarios)
-- [7. Vigilant Mode Guide](#7-vigilant-mode-guide)
-- [8. Performance Tuning](#8-performance-tuning)
-- [9. Troubleshooting](#9-troubleshooting)
-- [10. Ethical Use](#10-ethical-use)
+## 🏗️ System Architecture & Operational Workflow
 
----
+VIGIL implements a systematic security methodology that progresses through three distinct phases: discovery, intelligence gathering, and persistent defense monitoring.
 
-## 1. Feature Overview
-
-### Core Recon
-- Target input supports IPv4, hostname, and URL.
-- Port selection supports single port, list, and range.
-- Full-range scanning supported (`1-65535` by default when `--ports` is omitted).
-- Multi-threaded socket connect scan.
-
-### Enrichment
-- Banner grabbing for HTTP, HTTPS (TLS-aware), and SSH.
-- CVE lookup from banner keywords via `nvdlib`.
-- Per-port heuristic risk scoring:
-  - HTTP header posture checks (`HSTS`, `CSP`, `X-Frame-Options`, `X-Content-Type-Options`, TRACE behavior),
-  - TLS posture checks (legacy protocol acceptance, certificate hints),
-  - basic port behavior checks.
-
-### Monitoring
-- ARP discovery for active LAN host mapping.
-- Vigilant mode for live packet monitoring.
-- Vigilant alerting for:
-  - possible SYN burst,
-  - possible port scan behavior,
-  - possible ARP spoof indication.
-
-### Output
-- Rich live table output (if `rich` is installed).
-- Plain fallback output if `rich` is not available.
-- Optional export to text report via `--output`.
-
----
-
-## 2. Installation
-
-### Requirements
-- Python `3.10+`
-- Windows users: Npcap/WinPcap recommended for scapy capture features.
-
-### Setup
-```bash
-git clone https://github.com/ForwardEcho/VIGIL.git
-cd VIGIL
-pip install scapy nvdlib rich
-```
-
-### Verify
-```bash
-python vigil.py -h
+```mermaid
+flowchart TD
+    subgraph "Phase 1: Network Discovery"
+        A[System Initialization] --> B[Layer 2 ARP Scanning]
+        B --> C[High-Speed Port Enumeration]
+        C --> D[Live Host Mapping]
+    end
+    
+    subgraph "Phase 2: Security Intelligence"
+        D --> E[Service Banner Extraction]
+        E --> F[Automated Vulnerability Assessment]
+        F --> G[NVD CVE Correlation]
+        G --> H[Risk Scoring & Prioritization]
+    end
+    
+    subgraph "Phase 3: Continuous Defense"
+        H --> I[IDS Sentinel Activation]
+        I --> J[Real-time Packet Analysis]
+        J --> K[Threat Pattern Recognition]
+        K --> L[Security Dashboard Updates]
+        L --> M[Alert Generation & Response]
+    end
 ```
 
 ---
 
-## 3. Quick Start
+## 🔧 Core Capabilities & Architecture
 
-### Fastest recon (speed-focused)
+### 🎯 Mission-Critical Features
+
+### 🔍 Advanced Reconnaissance Engine
+VIGIL employs a sophisticated **multi-threaded asynchronous architecture** to deliver comprehensive attack surface mapping with minimal latency.
+
+- **Layer 2 Network Discovery**: Utilizes ARP requests to identify active hosts, effectively bypassing traditional Layer 3 ICMP/Ping restrictions
+- **Real-time Data Streaming**: Implements live row population to eliminate scanning delays and provide immediate visibility
+- **Hardware Intelligence**: Automatically correlates MAC addresses with our comprehensive database of 20,000+ manufacturer OUI identifiers
+
+### 🧠 Intelligent Security Analytics
+Beyond simple port discovery, VIGIL performs comprehensive security audits on identified services.
+
+- **Service Enumeration**: Advanced banner grabbing protocols for HTTP/S, SSH, and other services to extract precise version information
+- **Vulnerability Intelligence**: Direct integration with the **National Vulnerability Database (NVD)** for immediate CVE correlation and risk assessment
+- **Automated Security Posture Assessment**: Implements heuristic analysis across all discovered services:
+  - **HTTP Security Headers**: Validates critical security headers including HSTS, CSP, X-Frame-Options, and more
+  - **TLS/SSL Configuration**: Analyzes cryptographic protocols, identifying deprecated versions (TLS 1.0/1.1) and certificate validity issues
+
+### 🛡️ Real-time Intrusion Detection
+A sophisticated, high-performance **Intrusion Detection System (IDS)** providing continuous threat monitoring.
+
+- **SYN Flood Detection**: Identifies high-volume connection attempts using rolling 10-second analysis windows
+- **Multi-Protocol Flood Protection**: Specialized detection signatures for UDP and ICMP flooding attacks
+- **ARP Security Monitoring**: Detects ARP cache poisoning attempts and suspicious MAC address redirections
+- **Behavioral Anomaly Detection**: Advanced pattern recognition for identifying sequential port scanning and reconnaissance activities
+
+---
+
+## � Quick Start Guide
+
+VIGIL is engineered for rapid deployment with minimal configuration requirements.
+
+> ⚠️ **System Requirements**: Raw packet operations require elevated privileges (Root/Administrator) for optimal functionality.
+
+### Prerequisites Installation
+
+#### Network Driver Configuration
+VIGIL requires low-level network access capabilities:
+- **Windows**: Install [Npcap](https://nmap.org/npcap/) with WinPcap API compatibility mode
+- **Linux**: Install libpcap development package (`sudo apt install libpcap-dev`)
+- **macOS**: Install libpcap via Homebrew (`brew install libpcap`)
+
+#### Python Dependencies
 ```bash
-python vigil.py --target example.com --fast
+pip install scapy nvdlib rich colorama
 ```
 
-### Balanced recon (with risks + CVE)
+**Alternative Installation Methods:**
 ```bash
-python vigil.py --target example.com --ports 22,80,443 -w 120 -vv
+# Using requirements file
+pip install -r requirements.txt
+
+# Development installation
+pip install -e .
 ```
 
-### LAN host discovery
+### Initial Security Assessment
+
+#### Network Discovery
 ```bash
-python vigil.py --discover 192.168.1.0/24 -i "Wi-Fi"
+# Comprehensive host discovery
+python vigil.py --discover 192.168.1.0/24 --save-results
+
+# Targeted reconnaissance
+python vigil.py -t 192.168.1.10 -p 1-1000 --verbose --cve-check
 ```
 
-### Vigilant packet monitoring
+#### Real-time Threat Monitoring
 ```bash
-python vigil.py --vigilant --interface "Wi-Fi" --bpf tcp
+# Activate IDS monitoring mode
+python vigil.py --vigilant -i "Ethernet" --alert-threshold 10
+
+# Custom monitoring configuration
+python vigil.py --vigilant --interface "Wi-Fi" --bpf "tcp and port 443" --log-file security.log
 ```
 
 ---
 
-## 4. Detailed CLI Reference
+## 📋 Command Line Interface Reference
 
-## Targeting and Port Scan
+### Core Operations
+| Parameter | Short Flag | Default Value | Description |
+|-----------|------------|---------------|-------------|
+| `--target` | `-t` | `None` | Target specification (IP, hostname, or URL) |
+| `--ports` | `-p` | `1-65535` | Port specification (comma-separated or ranges) |
+| `--threads` | `-w` | `100` | Concurrent scanning threads |
+| `--timeout` | N/A | `0.5s` | Connection timeout in seconds |
+| `--fast` | N/A | `False` | Optimized scanning mode (3x faster) |
+| `--vigilant` | `-v` | `False` | Activate IDS monitoring mode |
+| `--bpf` | N/A | `None` | Custom Berkeley Packet Filter expression |
 
-- `-t`, `--target`
-  - Target to scan.
-  - Accepts:
-    - IP: `192.168.1.10`
-    - Hostname: `scanme.nmap.org`
-    - URL: `https://example.com/path`
-
-- `-p`, `--ports`
-  - Port selection.
-  - Formats:
-    - single: `80`
-    - list: `22,80,443`
-    - range: `1-1024`
-    - mixed: `22,80-90,443`
-  - If omitted, VIGIL scans all ports (`1-65535`).
-
-- `-w`, `--threads`
-  - Number of worker threads.
-  - Default: `100`.
-  - Higher = faster but more resource usage/noise.
-
-- `--timeout`
-  - Socket timeout in seconds.
-  - Default: `0.5`.
-  - Lower value can speed up scans on noisy targets, but may miss slow responses.
-
-## Scan Modes and Enrichment
-
-- `-vv`, `--verbose`
-  - Enables banner-grabbing probes and extra debug details.
-
-- `--fast`
-  - Speed mode.
-  - Automatically:
-    - lowers timeout ceiling,
-    - disables verbose probe behavior,
-    - disables CVE lookup,
-    - disables heuristic scoring.
-  - Best for quick reconnaissance pass.
-
-- `--no-cve`
-  - Disable CVE lookup only.
-
-- `--no-heuristic`
-  - Disable heuristic checks only.
-
-- `-o`, `--output`
-  - Save scan result to text file.
-
-## Discovery and Interface
-
-- `-d`, `--discover`
-  - Discover active hosts in CIDR range (ARP-based).
-  - Example: `192.168.1.0/24`.
-
-- `-i`, `--interface`
-  - Network interface to use.
-
-- `-si`, `--show-interfaces`
-  - Show available interfaces.
-
-## Vigilant Mode
-
-- `-v`, `--vigilant`
-  - Enable continuous packet monitoring mode.
-
-- `--bpf`
-  - Optional BPF capture filter (e.g., `tcp`, `arp`, `tcp port 443`).
-
-- `--alert-threshold`
-  - Threshold for SYN burst and scan-behavior alerts.
-  - Default: `25`.
-
-- `--vigilant-output`
-  - Append vigilant packet logs to a file.
+### Advanced Options
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--interface` | Auto-detect | Network interface for packet capture |
+| `--output` | `None` | Output file for results |
+| `--format` | `json` | Output format (json, csv, xml) |
+| `--cve-check` | `True` | Enable CVE vulnerability assessment |
+| `--verbose` | `False` | Detailed output and logging |
 
 ---
 
-## 5. Scan Output Format
+## 📚 Technical Documentation
 
-During scan, VIGIL prints a live table with:
-- `Port`
-- `Service`
-- `Risk`
-- `Score`
-- `Banner`
-- `CVE`
+### Security Terminology
+| Acronym | Domain | Definition |
+|---------|--------|------------|
+| **ARP** | Network Layer | Address Resolution Protocol - maps IP addresses to MAC addresses |
+| **BPF** | Packet Filtering | Berkeley Packet Filter - kernel-level packet filtering syntax |
+| **CVE** | Vulnerability Management | Common Vulnerabilities and Exposures - public security flaw database |
+| **IDS** | Security Monitoring | Intrusion Detection System - real-time threat monitoring |
+| **OUI** | Hardware Identification | Organizationally Unique Identifier - MAC address manufacturer codes |
 
-Notes:
-- `Risk`/`Score` depend on heuristic checks. If heuristics are disabled, values are minimal/default.
-- `CVE` field is populated when a banner is detected and CVE lookup is enabled.
-- Very long `Banner`/`CVE` strings are truncated for readability in terminal width.
+### Security Headers Reference
+| Header | Purpose | Security Impact |
+|--------|---------|----------------|
+| **HSTS** | HTTP Strict Transport Security | Enforces HTTPS connections |
+| **CSP** | Content Security Policy | Prevents XSS attacks |
+| **XFO** | X-Frame-Options | Mitigates clickjacking |
+| **X-Content-Type-Options** | MIME type protection | Prevents MIME sniffing attacks |
 
 ---
 
-## 6. Usage Scenarios
+## 🔧 Performance Optimization & Troubleshooting
 
-### A. Fast internet-facing baseline
-```bash
-python vigil.py --target example.com --ports 1-2000 --fast
-```
+### Common Resolution Strategies
 
-### B. Focused web service assessment
-```bash
-python vigil.py --target https://example.com --ports 80,443,8080,8443 -vv --output web_scan.txt
-```
+#### CVE Data Unavailable
+**Issue**: CVE column appears empty during scans
+**Solution**: 
+- Verify NVD API accessibility and rate limits
+- Enable verbose mode (`--verbose`) for banner grabbing diagnostics
+- Check network connectivity to NVD servers
 
-### C. SSH + admin port review
+#### Scanning Performance Issues
+**Issue**: Slow or incomplete scanning progress
+**Resolution**:
 ```bash
-python vigil.py --target 10.10.10.5 --ports 22,2222,3389,5900 -w 150 --no-cve
-```
+# Increase timeout for high-latency networks
+python vigil.py -t target.com --timeout 2.0
 
-### D. Full scan with balanced speed
-```bash
-python vigil.py --target scanme.nmap.org -w 150 --timeout 0.35 --no-cve
-```
+# Reduce thread count for stability
+python vigil.py -t target.com --threads 50
 
-### E. Host discovery before scanning
-```bash
-python vigil.py --discover 192.168.1.0/24 --interface "Ethernet"
+# Use fast mode for large networks
+python vigil.py -t target.com --fast
 ```
 
 ---
 
-## 7. Vigilant Mode Guide
+## ⚖️ Legal & Ethical Compliance
 
-### Basic
-```bash
-python vigil.py --vigilant --interface "Wi-Fi"
-```
+### Authorized Use Policy
+VIGIL is distributed exclusively for **authorized security testing, research, and educational purposes**. Users must comply with all applicable laws and regulations.
 
-### TCP-only monitoring
-```bash
-python vigil.py --vigilant --interface "Wi-Fi" --bpf tcp
-```
+**Usage Requirements:**
+- Obtain explicit written permission before conducting security assessments
+- Ensure compliance with organizational security policies
+- Adhere to regional and international cybersecurity laws
 
-### ARP-focused monitoring with log export
-```bash
-python vigil.py --vigilant --interface "Wi-Fi" --bpf arp --vigilant-output vigilant.log
-```
-
-### Higher sensitivity alerts
-```bash
-python vigil.py --vigilant --interface "Wi-Fi" --alert-threshold 15
-```
+### Liability Disclaimer
+The developers and maintainers of VIGIL assume no responsibility for misuse, unauthorized access, or legal consequences resulting from improper deployment of this software.
 
 ---
 
-## 8. Performance Tuning
+## 🤝 Contributing & Support
 
-If scan feels slow:
-- start with `--fast`,
-- increase `--threads` gradually (`120`, `150`, `200`),
-- lower `--timeout` carefully (`0.5` -> `0.35` -> `0.25`),
-- disable heavy enrichments (`--no-cve`, `--no-heuristic`),
-- narrow ports (`--ports 1-2000` or targeted sets).
+### Project Information
+- **Maintainer**: [ForwardEcho](https://github.com/ForwardEcho)
+- **License**: [MIT License](LICENSE)
+- **Repository**: [GitHub Project](https://github.com/ForwardEcho/VIGIL)
 
-Suggested presets:
-- **Fast recon:** `--fast`
-- **Balanced:** `-w 120 --timeout 0.35 --no-cve`
-- **Detailed:** `-vv` with selected ports
+### Community & Support
+- **Issues**: [Bug Reports & Feature Requests](https://github.com/ForwardEcho/VIGIL/issues)
+- **Discussions**: [Community Forum](https://github.com/ForwardEcho/VIGIL/discussions)
+- **Documentation**: [Wiki](https://github.com/ForwardEcho/VIGIL/wiki)
 
----
-
-## 9. Troubleshooting
-
-### No banner appears
-- Service may hide or suppress banner.
-- Try `-vv` and focused ports (`22,80,443`).
-- HTTPS banner depends on TLS/Server header behavior.
-
-### CVE column is empty (`-`)
-- No usable banner detected, or
-- lookup disabled (`--no-cve` / `--fast`), or
-- no direct keyword match in NVD search.
-
-### Scan feels stuck
-- Full port scans can take time on high-latency targets.
-- Use `--ports` to narrow scope.
-- Use lower timeout and/or more threads.
-
-### Permission errors in discovery/vigilant mode
-- Run shell with required privileges.
-- Ensure packet capture driver (Npcap/WinPcap) is installed on Windows.
-
-### Table output not styled
-- Install `rich`:
-```bash
-pip install rich
-```
+### Contribution Guidelines
+We welcome contributions from the security community. Please review our contribution guidelines and submit pull requests for enhancements and bug fixes.
 
 ---
 
-## 10. Ethical Use
-
-VIGIL is for educational use and authorized security testing only.
-- Scan only systems you own or have explicit permission to test.
-- Unauthorized scanning may violate law and policy.
-- You are responsible for your own usage.
-
----
-
-## Contributing
-
-Contributions are welcome. Improvements that are highly useful:
-- better service fingerprinting,
-- structured export formats (JSON/CSV),
-- automated tests,
-- performance and detection tuning.
-
----
-
-## Author
-
-ForwardEcho - [GitHub](https://github.com/ForwardEcho)
+**VIGIL - Empowering Security Professionals with Advanced Network Intelligence**

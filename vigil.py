@@ -1,7 +1,7 @@
 import nvdlib
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from scapy.all import srp, Ether, ARP, conf, show_interfaces, sniff, sr1, IP, TCP
+from scapy.all import srp, Ether, ARP, conf, show_interfaces, sniff, sr1, IP, TCP, sendp, UDP, ICMP
 import threading
 import argparse
 import socket
@@ -14,10 +14,13 @@ import warnings
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 try:
-    from rich.console import Console
+    from rich.console import Console, Group
     from rich.table import Table
     from rich.panel import Panel
     from rich.live import Live
+    from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, MofNCompleteColumn, TimeElapsedColumn
+    from rich.layout import Layout
+    from rich.columns import Columns
     from rich import box
     RICH_AVAILABLE = True
 except ImportError:
@@ -41,9 +44,13 @@ heuristic_records = []
 cve_cache = {}
 syn_counter = {}
 scan_counter = {}
+udp_counter = {}
+icmp_counter = {}
 arp_table = {}
 scan_header_printed = False
 live_table_enabled = False
+vigilant_log = []
+vigilant_alerts = []
 console = Console() if RICH_AVAILABLE else None
 
 with open("vendors.json", "r", encoding="utf-8") as f:
@@ -594,52 +601,190 @@ def lookup_cve(banner):
 
 def discover_network(discover, interface, verbose=False):
     try:
-        packet = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=discover)
-        answered, unanswered = srp(packet, timeout=2, verbose=verbose)
+        # Parse targets into a list of individual IPs for the thread pool
+        try:
+            # If discovery is a CIDR block, get all host IPs
+            if "/" in discover:
+                net = ipaddress.ip_network(discover, strict=False)
+                targets = [str(ip) for ip in net.hosts()]
+            else:
+                targets = [discover]
+        except ValueError:
+            targets = [discover]
 
-        for sent, received in answered:
-            active_ip = received.psrc
-            mac_addr = received.hwsrc
-            oiu_prefix = mac_addr[:8].lower()
-            vendor = vendors_dict.get(oiu_prefix)
+        if RICH_AVAILABLE:
+            console.print(f"[bold cyan]🔍 Live Discovering active hosts on network:[/] [green]{discover}[/]")
+            table = Table(
+                title=f"Network Discovery - {discover}",
+                box=box.ROUNDED,
+                header_style="bold magenta",
+                border_style="blue",
+                show_lines=True
+            )
+            table.add_column("IP Address", style="cyan", justify="left")
+            table.add_column("Hostname", style="green", justify="left")
+            table.add_column("MAC Address", style="yellow", justify="left")
+            table.add_column("Vendor", style="white", justify="left")
+        else:
+            print(f"[*] Discovering active hosts on network: {discover}")
+
+        found_count = 0
+
+        def probe_ip(ip):
+            """Helper to probe a single IP and return result if active."""
             try:
-                hostname = socket.gethostbyaddr(active_ip)[0]
+                packet = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ip)
+                # Shorter timeout per IP probe to keep it snappy
+                answered, _ = srp(packet, timeout=1.5, verbose=False, iface=interface)
+                if answered:
+                    received = answered[0][1]
+                    mac = received.hwsrc
+                    oiu_prefix = mac[:8].lower()
+                    vendor = vendors_dict.get(oiu_prefix, "Unknown Vendor")
+                    try:
+                        hostname = socket.gethostbyaddr(ip)[0]
+                    except:
+                        hostname = "unknown"
+                    return (ip, hostname, mac, vendor)
             except:
-                hostname = "unknown"
-            print(f"\033[1;32m✓\033[0m {received.psrc} is active | {hostname} | {vendor}")
-        
-        print(f"sent {len(packet)} packets, received {len(answered)} packets")
+                pass
+            return None
+
+        if RICH_AVAILABLE:
+            # Progress bar for discovery to show it's working
+            progress = Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(bar_width=None),
+                MofNCompleteColumn(),
+                TimeElapsedColumn(),
+                console=console
+            )
+            task_id = progress.add_task(f"[cyan]Probing {len(targets)} hosts...", total=len(targets))
+            
+            def get_discovery_display():
+                return Group(table, progress)
+
+            with Live(get_discovery_display(), console=console, refresh_per_second=10):
+                # Using 50 workers for a fast, responsive live scan
+                with ThreadPoolExecutor(max_workers=50) as executor:
+                    futures = [executor.submit(probe_ip, ip) for ip in targets]
+                    for future in as_completed(futures):
+                        res = future.result()
+                        progress.update(task_id, advance=1)
+                        if res:
+                            table.add_row(*res)
+                            found_count += 1
+            
+            console.print(f"\n[bold blue]Summary:[/] Discovery complete. Found [bold green]{found_count}[/] active hosts.")
+        else:
+            with ThreadPoolExecutor(max_workers=50) as executor:
+                futures = [executor.submit(probe_ip, ip) for ip in targets]
+                for future in as_completed(futures):
+                    res = future.result()
+                    if res:
+                        print(f"\033[1;32m✓\033[0m {res[0]} is active | {res[1]} | {res[3]}")
+                        found_count += 1
+            print(f"discovery complete, found {found_count} hosts")
 
     except PermissionError:
-        print("[+] Permission denied. Run as root")
+        if RICH_AVAILABLE:
+            console.print("[bold red][!] Permission denied. Run as administrator/root.[/]")
+        else:
+            print("[+] Permission denied. Run as root")
     except Exception as e:
-        print(f"[!] Error: {e}")
+        if RICH_AVAILABLE:
+            console.print(f"[bold red][!] Error:[/] {e}")
+        else:
+            print(f"[!] Error: {e}")
+
+def build_vigilant_dashboard(interface, bpf_filter, alert_threshold):
+    layout = Layout()
+    layout.split_column(
+        Layout(name="header", size=3),
+        Layout(name="body")
+    )
+    layout["body"].split_row(
+        Layout(name="logs", ratio=2),
+        Layout(name="security", ratio=1)
+    )
+
+    # Header Panel
+    filter_text = bpf_filter if bpf_filter else "None"
+    header_content = (
+        f"[bold blue]Interface:[/] {interface}  |  "
+        f"[bold blue]BPF Filter:[/] {filter_text}  |  "
+        f"[bold blue]Threshold:[/] {alert_threshold}"
+    )
+    layout["header"].update(Panel(header_content, title="VIGILANT MODE STATUS", border_style="cyan"))
+
+    # Logs Table
+    log_table = Table(expand=True, box=box.SIMPLE)
+    log_table.add_column("Time", style="dim", width=12)
+    log_table.add_column("Packet Summary", style="green")
+    
+    with print_lock:
+        for timestamp, summary in vigilant_log[-12:]:
+            log_table.add_row(timestamp, summary)
+    
+    layout["logs"].update(Panel(log_table, title="Live Network Traffic", border_style="green"))
+
+    # Alerts Table
+    alert_table = Table(expand=True, box=box.SIMPLE)
+    alert_table.add_column("Type", style="bold red")
+    alert_table.add_column("Message", style="yellow")
+    
+    with print_lock:
+        for alert_type, msg in vigilant_alerts[-8:]:
+            alert_table.add_row(alert_type, msg)
+            
+    layout["security"].update(Panel(alert_table, title="Security Alerts", border_style="red"))
+
+    return layout
 
 def vigilant_mode(interface, bpf_filter=None, alert_threshold=25, vigilant_output=None):
     try:
-        print(f"\033[1;31m⍻\033[0m Vigilant mode enabled on interface {interface}")
-        print(f"\033[1;31m⍻\033[0m Monitoring network traffic...")
-        if bpf_filter:
-            print(f"[*] BPF Filter      : {bpf_filter}")
-        print(f"[*] Alert Threshold: {alert_threshold}\n")
-
-        sniff(
-            iface=interface,
-            filter=bpf_filter,
-            prn=lambda pkt: process_vigilant_packet(pkt, alert_threshold, vigilant_output),
-            store=False
-        )
+        if RICH_AVAILABLE:
+            console.print(Panel(f"Vigilant mode enabled on interface [bold cyan]{interface}[/]\nMonitoring network traffic...", title="VIGIL", border_style="red"))
+            
+            with Live(build_vigilant_dashboard(interface, bpf_filter, alert_threshold), console=console, refresh_per_second=4) as live:
+                sniff(
+                    iface=interface,
+                    filter=bpf_filter,
+                    prn=lambda pkt: process_vigilant_packet(pkt, alert_threshold, vigilant_output, live, interface),
+                    store=False
+                )
+        else:
+            print(f"\033[1;31m⍻\033[0m Vigilant mode enabled on interface {interface}")
+            print(f"\033[1;31m⍻\033[0m Monitoring network traffic...")
+            sniff(
+                iface=interface,
+                filter=bpf_filter,
+                prn=lambda pkt: process_vigilant_packet(pkt, alert_threshold, vigilant_output),
+                store=False
+            )
 
     except KeyboardInterrupt:
-        print(f"\033[1;31m⍻\033[0m Vigilant mode disabled")
+        if RICH_AVAILABLE:
+            console.print("\n[bold red]⍻[/] Vigilant mode disabled")
+        else:
+            print(f"\n\033[1;31m⍻\033[0m Vigilant mode disabled")
     except Exception as e:
-        print(f"[!] Vigilant mode error: {e}")
+        if RICH_AVAILABLE:
+            console.print(f"[bold red][!] Vigilant mode error:[/] {e}")
+        else:
+            print(f"[!] Vigilant mode error: {e}")
 
 
-def process_vigilant_packet(packet, alert_threshold, vigilant_output):
+def process_vigilant_packet(packet, alert_threshold, vigilant_output, live=None, interface=None):
     now = time.time()
     summary = packet.summary()
-    print(f"\033[1;32m✓\033[0m {summary}")
+    time_str = datetime.now().strftime("%H:%M:%S")
+
+    # Update Global Log
+    with print_lock:
+        vigilant_log.append((time_str, summary))
+        if len(vigilant_log) > 50: vigilant_log.pop(0)
 
     if vigilant_output:
         with open(vigilant_output, "a", encoding="utf-8") as f:
@@ -647,11 +792,16 @@ def process_vigilant_packet(packet, alert_threshold, vigilant_output):
 
     detect_syn_burst(packet, now, alert_threshold)
     detect_port_scan(packet, now, alert_threshold)
+    detect_udp_flood(packet, now, alert_threshold)
+    detect_icmp_flood(packet, now, alert_threshold)
     detect_arp_spoof(packet)
+
+    if RICH_AVAILABLE and live and interface:
+        live.update(build_vigilant_dashboard(interface, None, alert_threshold)) # Simplified filter for layout update
 
 
 def detect_syn_burst(packet, now, alert_threshold):
-    if IP in packet and TCP in packet and packet[TCP].flags == "S":
+    if IP in packet and TCP in packet and (packet[TCP].flags & 0x02): # Check for SYN bit explicitly
         src = packet[IP].src
         entries = syn_counter.get(src, [])
         entries = [t for t in entries if now - t <= 10]
@@ -659,10 +809,13 @@ def detect_syn_burst(packet, now, alert_threshold):
         syn_counter[src] = entries
 
         if len(entries) >= alert_threshold:
-            print(
-                f"\033[1;33m[ALERT]\033[0m Possible SYN burst from {src} "
-                f"({len(entries)} SYN packets in 10s)"
-            )
+            msg = f"Src {src} ({len(entries)} SYNs in 10s)"
+            with print_lock:
+                vigilant_alerts.append(("SYN BURST", msg))
+                if len(vigilant_alerts) > 20: vigilant_alerts.pop(0)
+            
+            if not RICH_AVAILABLE:
+                print(f"\033[1;33m[ALERT]\033[0m Possible SYN burst from {src}")
             syn_counter[src] = []
 
 
@@ -679,11 +832,54 @@ def detect_port_scan(packet, now, alert_threshold):
 
         unique_ports = {(target, port) for _, target, port in records}
         if len(unique_ports) >= alert_threshold:
-            print(
-                f"\033[1;33m[ALERT]\033[0m Possible port scan from {src} "
-                f"({len(unique_ports)} unique target ports in 15s)"
-            )
+            msg = f"Src {src} ({len(unique_ports)} ports in 15s)"
+            with print_lock:
+                vigilant_alerts.append(("PORT SCAN", msg))
+                if len(vigilant_alerts) > 20: vigilant_alerts.pop(0)
+                
+            if not RICH_AVAILABLE:
+                print(f"\033[1;33m[ALERT]\033[0m Possible port scan from {src}")
             scan_counter[src] = []
+
+
+def detect_udp_flood(packet, now, alert_threshold):
+    if IP in packet and UDP in packet:
+        src = packet[IP].src
+        entries = udp_counter.get(src, [])
+        entries = [t for t in entries if now - t <= 10]
+        entries.append(now)
+        udp_counter[src] = entries
+
+        if len(entries) >= alert_threshold:
+            msg = f"Src {src} ({len(entries)} UDPs in 10s)"
+            with print_lock:
+                vigilant_alerts.append(("UDP FLOOD", msg))
+                if len(vigilant_alerts) > 20: vigilant_alerts.pop(0)
+            
+            if not RICH_AVAILABLE:
+                print(f"\033[1;33m[ALERT]\033[0m Possible UDP flood from {src}")
+            udp_counter[src] = []
+
+
+def detect_icmp_flood(packet, now, alert_threshold):
+    if IP in packet and ICMP in packet:
+        # Check for Echo Request (type 8)
+        if packet[ICMP].type == 8:
+            src = packet[IP].src
+            entries = icmp_counter.get(src, [])
+            entries = [t for t in entries if now - t <= 10]
+            entries.append(now)
+            icmp_counter[src] = entries
+
+            if len(entries) >= alert_threshold:
+                msg = f"Src {src} ({len(entries)} ICMPs in 10s)"
+                with print_lock:
+                    vigilant_alerts.append(("ICMP FLOOD", msg))
+                    if len(vigilant_alerts) > 20: vigilant_alerts.pop(0)
+                
+                if not RICH_AVAILABLE:
+                    print(f"\033[1;33m[ALERT]\033[0m Possible ICMP flood from {src}")
+                icmp_counter[src] = []
 
 
 def detect_arp_spoof(packet):
@@ -695,10 +891,13 @@ def detect_arp_spoof(packet):
     previous = arp_table.get(ip)
 
     if previous and previous != mac:
-        print(
-            f"\033[1;33m[ALERT]\033[0m Possible ARP spoof detected for IP {ip}: "
-            f"{previous} -> {mac}"
-        )
+        msg = f"IP {ip}: {previous} -> {mac}"
+        with print_lock:
+            vigilant_alerts.append(("ARP SPOOF", msg))
+            if len(vigilant_alerts) > 20: vigilant_alerts.pop(0)
+            
+        if not RICH_AVAILABLE:
+            print(f"\033[1;33m[ALERT]\033[0m Possible ARP spoof detected for IP {ip}")
     arp_table[ip] = mac
 
 def parse_ports(port_input):
@@ -869,6 +1068,12 @@ def main():
     if target:
         try:
             scan_ports = parse_ports(ports)
+            
+            # Enable live table mode BEFORE starting threads to prevent duplicate/leaked output
+            if RICH_AVAILABLE:
+                global live_table_enabled
+                live_table_enabled = True
+
             with ThreadPoolExecutor(max_workers=thread) as executor:
                 futures = [
                     executor.submit(
@@ -883,12 +1088,33 @@ def main():
                     )
                     for port in scan_ports
                 ]
+                
                 if RICH_AVAILABLE:
-                    global live_table_enabled
-                    live_table_enabled = True
-                    with Live(build_live_scan_table(), console=console, refresh_per_second=5, transient=False) as live:
+                    # Create a progress bar for port scanning
+                    progress = Progress(
+                        SpinnerColumn(),
+                        TextColumn("[progress.description]{task.description}"),
+                        BarColumn(bar_width=None),
+                        MofNCompleteColumn(),
+                        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                        TimeElapsedColumn(),
+                        console=console
+                    )
+                    
+                    task_id = progress.add_task(f"[cyan]Scanning {len(scan_ports)} ports...", total=len(scan_ports))
+                    
+                    # Group the findings table and the progress bar for Live display
+                    def get_live_display():
+                        return Group(
+                            build_live_scan_table(),
+                            progress
+                        )
+
+                    with Live(get_live_display(), console=console, refresh_per_second=10) as live:
                         for _ in as_completed(futures):
-                            live.update(build_live_scan_table())
+                            progress.update(task_id, advance=1)
+                            live.update(get_live_display())
+                            
                     live_table_enabled = False
                 else:
                     for future in as_completed(futures):
